@@ -1,3 +1,27 @@
 spring:
   application:
     name: enterprise-it-copilot
+  datasource:
+    driver-class-name: org.postgresql.Driver
+    url: jdbc:postgresql://127.0.0.1:5432/ragent?client_encoding=UTF8
+    username: postgres
+    password: postgres
+
+mybatis-plus:
+  configuration:
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+logging:
+  level:
+    com.xht.itcopilot.mapper: debug
+    com.xht.itcopilot.service: info
+
+
+rag:
+  storage:
+    kb-bucket: rag-it-source
+    s3:
+      endpoint: http://localhost:9000
+      access-key: rustfsadmin
+      secret-key: rustfsadmin
+server:
+  port: 1001
