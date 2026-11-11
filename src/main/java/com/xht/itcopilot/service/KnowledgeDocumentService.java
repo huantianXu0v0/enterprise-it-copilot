@@ -6,12 +6,20 @@ import com.xht.itcopilot.mapper.KnowledgeDocumentMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.tika.Tika;
+import org.apache.tika.exception.TikaException;
+import org.apache.tika.metadata.Metadata;
+import org.apache.tika.metadata.TikaCoreProperties;
+import org.apache.tika.parser.AutoDetectParser;
+import org.apache.tika.parser.ParseContext;
+import org.apache.tika.sax.ToXMLContentHandler;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
+import org.xml.sax.SAXException;
 
+import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.sql.Wrapper;
 import java.util.Locale;
@@ -22,13 +30,13 @@ import java.util.Locale;
 public class KnowledgeDocumentService {
 
     private final KnowledgeDocumentMapper documentMapper;
+
     private final FileStorageService fileStorageService;
 
     public String upload(String kbId, MultipartFile file)
             throws IOException {
 
         String collectionName = documentMapper.findCollectionName(kbId);
-        log.debug(collectionName + "  !!!!");
         if (collectionName == null) {
             throw new ResponseStatusException(
                     HttpStatus.NOT_FOUND, "知识库不存在");
@@ -82,5 +90,46 @@ public class KnowledgeDocumentService {
 
         // MyBatis-Plus 自动生成的 ID 已回填到实体。
         return document.getId();
+    }
+
+
+    public String parse(String docId) throws TikaException, IOException, SAXException {
+
+        KnowledgeDocumentDO document = documentMapper.selectById(docId);
+
+        if(document == null){
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "文档不存在");
+        }
+
+        // 取 file_url, 从RustFS 取文档内容 由 Tika 解析
+        log.info("开始解析文档，docId={}, key={}",
+                docId, document.getFileUrl());
+
+        // Tika 解析器
+        var parser = new AutoDetectParser();
+        var handler = new ToXMLContentHandler();
+        var metadata = new Metadata();
+
+        // 对象 key 没有扩展名，提供原始文件名辅助类型识别。
+        metadata.set(
+                TikaCoreProperties.RESOURCE_NAME_KEY,
+                document.getDocName());
+
+        // 3. 从 RustFS 读取，解析完成后关闭流。
+        try (var input = new BufferedInputStream(
+                fileStorageService.openStream(document.getFileUrl()))) {
+
+            parser.parse(input, handler, metadata, new ParseContext());
+
+            String xhtml = handler.toString();
+            log.info("文档解析完成，docId={}, 输出字符数={}",
+                    docId, xhtml.length());
+
+            return xhtml;
+        } catch (Exception exception) {
+            log.error("文档解析失败，docId={}", docId, exception);
+            throw exception;
+        }
+
     }
 }

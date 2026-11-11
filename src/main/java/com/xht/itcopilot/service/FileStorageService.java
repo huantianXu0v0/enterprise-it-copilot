@@ -41,6 +41,17 @@ public class FileStorageService {
                     inputStream, file.getOriginalFilename()
             );
 
+//            String originalName = file.getOriginalFilename();
+//            if (originalName != null) {
+//                // 空文件
+//                int dotIndex = originalName.lastIndexOf(".");
+//                String fileNameNoSuffix;
+//                if (dotIndex > 0) {
+//                    fileNameNoSuffix = originalName.substring(0, dotIndex);
+//                } else {
+//                    fileNameNoSuffix = originalName;
+//                }
+//            }
             String key = kbId + "/" + UUID.randomUUID();
 
             // 建立 上传请求格式
@@ -66,6 +77,11 @@ public class FileStorageService {
     public void delete(String key) {
         s3Client.deleteObject(request ->
                 request.bucket(bucket).key(key));
+    }
+
+    public InputStream openStream(String fileUrl) {
+
+        return s3Client.getObject(request -> request.bucket(bucket).key(fileUrl));
     }
 
 }
