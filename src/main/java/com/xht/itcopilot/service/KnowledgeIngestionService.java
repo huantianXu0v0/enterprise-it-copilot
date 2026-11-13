@@ -40,6 +40,9 @@ public class KnowledgeIngestionService {
     @Value("${ai.embedding.dimensions}")
     private int dimensions;
 
+    // 1/将向量库 和 chunk库中的 对应文档之前的内容删除
+    // 2/插入 新划分好的 chunks 入 chunk库, 插入 新embed 的chunks 入 向量库
+    // 3/将 document 状态 从 pending -> success
     public int ingest(String docId, int chunkSize, int overlap)
             throws Exception {
 
@@ -54,8 +57,7 @@ public class KnowledgeIngestionService {
                     HttpStatus.NOT_FOUND, "文档不存在");
         }
 
-        KnowledgeBaseDO kb =
-                knowledgeBaseMapper.selectById(document.getKbId());
+        KnowledgeBaseDO kb = knowledgeBaseMapper.selectById(document.getKbId());
 
         if (kb == null || !Integer.valueOf(0).equals(kb.getDeleted())) {
             throw new ResponseStatusException(
@@ -80,12 +82,8 @@ public class KnowledgeIngestionService {
                     "文档正在处理，或文档已禁用、删除");
         }
 
-        log.info("开始文档入库：docId={}, collection={}",
-                docId, kb.getCollectionName());
-
         try {
-            List<ChunkPreview> chunks =
-                    documentService.previewChunks(docId, chunkSize, overlap);
+            List<ChunkPreview> chunks = documentService.previewChunks(docId, chunkSize, overlap);
 
             if (chunks.isEmpty()) {
                 throw new ResponseStatusException(
@@ -106,17 +104,16 @@ public class KnowledgeIngestionService {
             // 事务外完成全部向量化，保留完整向量，不使用预览中的 sample。
             List<String> vectors = new ArrayList<>();
             for (ChunkPreview chunk : chunks) {
-                List<Double> vector =
-                        embeddingService.embed(chunk.getContent());
+                List<Double> vector = embeddingService.embed(chunk.getContent());
 
                 vectors.add(vector.toString());
             }
 
             // 只有下面的数据库操作处于同一个事务中。
-            TransactionTemplate transaction =
-                    new TransactionTemplate(transactionManager);
+            TransactionTemplate transaction = new TransactionTemplate(transactionManager);
 
             transaction.executeWithoutResult(status -> {
+                // 这个文档之前的 embed 和 切块 删除
                 ingestionMapper.deleteVectors(docId);
                 ingestionMapper.deleteChunks(docId);
 
@@ -124,8 +121,7 @@ public class KnowledgeIngestionService {
                     ChunkPreview chunk = chunks.get(i);
                     String chunkId = IdWorker.getIdStr();
 
-                    if (ingestionMapper.insertChunk(
-                            chunkId, document, chunk) != 1) {
+                    if (ingestionMapper.insertChunk(chunkId, document, chunk) != 1) {
                         throw new IllegalStateException("分块写入失败");
                     }
 

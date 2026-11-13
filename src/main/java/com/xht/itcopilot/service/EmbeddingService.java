@@ -34,7 +34,7 @@ public class EmbeddingService {
     private int dimensions;
 
     private final RestClient restClient;
-
+    // 构造方法
     public EmbeddingService() {
 
         HttpClient httpClient = HttpClient.newBuilder()
@@ -49,6 +49,7 @@ public class EmbeddingService {
                 .build();
     }
 
+    // 文本向量化,调用 embed模型 ,返回 1536维数组
     public List<Double> embed(String text) {
         if (!StringUtils.hasText(text)) {
             throw new ResponseStatusException(

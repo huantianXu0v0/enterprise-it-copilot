@@ -71,6 +71,7 @@ public class KnowledgeBaseController {
     }
 
     /**
+     * 测试
      * 调用 Embedding
      */
     @PostMapping("/embedding/preview")

@@ -29,6 +29,11 @@ server:
 ai:
   embedding:
     url: https://dashscope.aliyuncs.com/compatible-mode/v1/embeddings
-    api-key: ${DASHSCOPE_API_KEY}
+    api-key: ${embed-key}
     model: text-embedding-v4
     dimensions: 1536
+
+  chat:
+    url: https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions
+    api-key: ${chat-key}
+    model: qwen-plus
