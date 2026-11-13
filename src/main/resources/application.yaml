@@ -25,3 +25,10 @@ rag:
       secret-key: rustfsadmin
 server:
   port: 1001
+
+ai:
+  embedding:
+    url: https://dashscope.aliyuncs.com/compatible-mode/v1/embeddings
+    api-key: ${DASHSCOPE_API_KEY}
+    model: text-embedding-v4
+    dimensions: 1536
