@@ -1,8 +1,10 @@
 package com.xht.itcopilot.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.xht.itcopilot.entity.ChunkPreview;
 import com.xht.itcopilot.entity.KnowledgeDocumentDO;
 import com.xht.itcopilot.mapper.KnowledgeDocumentMapper;
+import com.xht.itcopilot.rag.StructuredTextSplitter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.tika.Tika;
@@ -22,6 +24,7 @@ import org.xml.sax.SAXException;
 import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.sql.Wrapper;
+import java.util.List;
 import java.util.Locale;
 
 @Service
@@ -32,6 +35,8 @@ public class KnowledgeDocumentService {
     private final KnowledgeDocumentMapper documentMapper;
 
     private final FileStorageService fileStorageService;
+
+    private final StructuredTextSplitter structuredTextSplitter;
 
     public String upload(String kbId, MultipartFile file)
             throws IOException {
@@ -92,7 +97,6 @@ public class KnowledgeDocumentService {
         return document.getId();
     }
 
-
     public String parse(String docId) throws TikaException, IOException, SAXException {
 
         KnowledgeDocumentDO document = documentMapper.selectById(docId);
@@ -131,5 +135,32 @@ public class KnowledgeDocumentService {
             throw exception;
         }
 
+    }
+
+    public List<ChunkPreview> previewChunks(String docId, int chunkSize, int overlap) throws Exception {
+
+        if (chunkSize <= 0 || overlap < 0 || overlap >= chunkSize) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "要求 chunkSize > 0，且 0 <= overlap < chunkSize");
+        }
+
+        // 复用：查文档 → 读取 RustFS → Tika 解析为 XHTML。
+        String xhtml = parse(docId);
+
+        List<ChunkPreview> chunks = structuredTextSplitter.split(xhtml, chunkSize, overlap);
+
+        for (ChunkPreview chunk : chunks) {
+            log.info("分块完成：docId={}, index={}, type={}, chars={}",
+                    docId, chunk.getChunkIndex(),
+                    chunk.getType(), chunk.getContent().length());
+
+            if (!"TEXT".equals(chunk.getType()) && chunk.getContent().length() > chunkSize) {
+                log.warn("特殊块超过目标长度，整体保留：docId={}, index={}",
+                        docId, chunk.getChunkIndex());
+            }
+        }
+
+        return chunks;
     }
 }
