@@ -1,10 +1,9 @@
 package com.xht.itcopilot.controller;
 
+import com.xht.itcopilot.entity.ChunkEmbeddingPreview;
 import com.xht.itcopilot.entity.ChunkPreview;
 import com.xht.itcopilot.entity.Result;
-import com.xht.itcopilot.service.FileStorageService;
-import com.xht.itcopilot.service.KnowledgeBaseServiceImpl;
-import com.xht.itcopilot.service.KnowledgeDocumentService;
+import com.xht.itcopilot.service.*;
 import lombok.RequiredArgsConstructor;
 import org.apache.tika.exception.TikaException;
 import org.springframework.http.MediaType;
@@ -24,6 +23,9 @@ public class KnowledgeBaseController {
 
     private final KnowledgeBaseServiceImpl knowledgeBaseService;
 
+    private final EmbeddingService embeddingService;
+
+    private final KnowledgeIngestionService knowledgeIngestionService;
     /**
      * 创建知识库
      */
@@ -67,4 +69,43 @@ public class KnowledgeBaseController {
 
         return Result.ok(knowledgeDocumentService.previewChunks(docId, chunkSize, overlap));
     }
+
+    /**
+     * 调用 Embedding
+     */
+    @PostMapping("/embedding/preview")
+    public Result<Map<String, Object>> previewEmbedding(@RequestParam("text") String text) {
+
+        List<Double> vector = embeddingService.embed(text);
+
+        return Result.ok(Map.of(
+                "dimensions", vector.size(),
+                "sample", vector.subList(0, Math.min(5, vector.size()))
+        ));
+    }
+
+    @PostMapping("/kb/{docId}/docs/embedding-preview")
+    public Result<List<ChunkEmbeddingPreview>> previewDocumentEmbedding(
+            @PathVariable("docId") String docId,
+            @RequestParam(defaultValue = "256") int chunkSize,
+            @RequestParam(defaultValue = "32") int overlap) throws Exception {
+
+        return Result.ok(knowledgeDocumentService.previewEmbeddings(docId, chunkSize, overlap));
+    }
+
+    @PostMapping("/kb/{docId}/docs/chunk")
+    public Result<Map<String, Object>> ingest(
+            @PathVariable("docId") String docId,
+            @RequestParam(defaultValue = "256") int chunkSize,
+            @RequestParam(defaultValue = "32") int overlap) throws Exception {
+
+        int count = knowledgeIngestionService.ingest(docId, chunkSize, overlap);
+
+        return Result.ok(Map.of(
+                "docId", docId,
+                "chunkCount", count,
+                "status", "success"
+        ));
+    }
+
 }

@@ -12,7 +12,7 @@ mybatis-plus:
     log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
 logging:
   level:
-    com.xht.itcopilot.mapper: debug
+    com.xht.itcopilot.mapper: info
     com.xht.itcopilot.service: info
 
 
@@ -29,6 +29,6 @@ server:
 ai:
   embedding:
     url: https://dashscope.aliyuncs.com/compatible-mode/v1/embeddings
-    api-key: ${DASHSCOPE_API_KEY}
+    api-key: sk-ws-H.PLXXYYL.Y6Sv.MEYCIQDJ69Po2jr2SZo4DdOoOtKoKl9jXdSMtCnGT8ojPAw-QwIhAO8DeGR0MtZIGQLAxtLeGLZBcVBZqiHfgQRotCd-GKKH
     model: text-embedding-v4
     dimensions: 1536

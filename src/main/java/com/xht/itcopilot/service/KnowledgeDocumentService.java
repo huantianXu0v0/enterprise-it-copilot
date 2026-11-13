@@ -1,6 +1,7 @@
 package com.xht.itcopilot.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.xht.itcopilot.entity.ChunkEmbeddingPreview;
 import com.xht.itcopilot.entity.ChunkPreview;
 import com.xht.itcopilot.entity.KnowledgeDocumentDO;
 import com.xht.itcopilot.mapper.KnowledgeDocumentMapper;
@@ -24,6 +25,7 @@ import org.xml.sax.SAXException;
 import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.sql.Wrapper;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
@@ -37,6 +39,8 @@ public class KnowledgeDocumentService {
     private final FileStorageService fileStorageService;
 
     private final StructuredTextSplitter structuredTextSplitter;
+
+    private final EmbeddingService embeddingService;
 
     public String upload(String kbId, MultipartFile file)
             throws IOException {
@@ -106,8 +110,8 @@ public class KnowledgeDocumentService {
         }
 
         // 取 file_url, 从RustFS 取文档内容 由 Tika 解析
-        log.info("开始解析文档，docId={}, key={}",
-                docId, document.getFileUrl());
+//        log.info("开始解析文档，docId={}, key={}",
+//                docId, document.getFileUrl());
 
         // Tika 解析器
         var parser = new AutoDetectParser();
@@ -126,8 +130,8 @@ public class KnowledgeDocumentService {
             parser.parse(input, handler, metadata, new ParseContext());
 
             String xhtml = handler.toString();
-            log.info("文档解析完成，docId={}, 输出字符数={}",
-                    docId, xhtml.length());
+//            log.info("文档解析完成，docId={}, 输出字符数={}",
+//                    docId, xhtml.length());
 
             return xhtml;
         } catch (Exception exception) {
@@ -151,9 +155,9 @@ public class KnowledgeDocumentService {
         List<ChunkPreview> chunks = structuredTextSplitter.split(xhtml, chunkSize, overlap);
 
         for (ChunkPreview chunk : chunks) {
-            log.info("分块完成：docId={}, index={}, type={}, chars={}",
-                    docId, chunk.getChunkIndex(),
-                    chunk.getType(), chunk.getContent().length());
+//            log.info("分块完成：docId={}, index={}, type={}, chars={}",
+//                    docId, chunk.getChunkIndex(),
+//                    chunk.getType(), chunk.getContent().length());
 
             if (!"TEXT".equals(chunk.getType()) && chunk.getContent().length() > chunkSize) {
                 log.warn("特殊块超过目标长度，整体保留：docId={}, index={}",
@@ -162,5 +166,52 @@ public class KnowledgeDocumentService {
         }
 
         return chunks;
+    }
+
+    public List<ChunkEmbeddingPreview> previewEmbeddings(String docId, int chunkSize, int overlap) throws Exception {
+
+        List<ChunkPreview> chunks = previewChunks(docId, chunkSize, overlap);
+
+        if (chunks.isEmpty()) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST, "文档没有可向量化的内容");
+        }
+
+        // 先检查所有块，再开始调用模型。
+        // 与当前 EmbeddingService 的测试限制保持一致。
+        for (ChunkPreview chunk : chunks) {
+            if (!StringUtils.hasText(chunk.getContent())
+                    || chunk.getContent().length() > 1024) {
+
+                throw new ResponseStatusException(
+                        HttpStatus.BAD_REQUEST,
+                        "分块 " + chunk.getChunkIndex()
+                                + " 内容为空或超过当前1024字符限制，类型："
+                                + chunk.getType());
+            }
+        }
+
+        List<ChunkEmbeddingPreview> results = new ArrayList<>();
+
+        // 第一版逐块调用，方便观察每块的执行情况。
+        for (ChunkPreview chunk : chunks) {
+//            log.info("开始分块向量化：docId={}, index={}, type={}",
+//                    docId, chunk.getChunkIndex(), chunk.getType());
+
+            List<Double> vector = embeddingService.embed(chunk.getContent());
+
+            results.add(new ChunkEmbeddingPreview(
+                    chunk.getChunkIndex(),
+                    chunk.getType(),
+                    vector.size(),
+                    new ArrayList<>(
+                            vector.subList(0, Math.min(5, vector.size())))
+            ));
+        }
+
+        log.info("文档向量化预览完成：docId={}, chunkCount={}",
+                docId, results.size());
+
+        return results;
     }
 }
