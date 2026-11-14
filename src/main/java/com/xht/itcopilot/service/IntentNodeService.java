@@ -10,10 +10,12 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.server.ResponseStatusException;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.time.LocalDateTime;
-import java.util.List;
+import java.util.*;
 
 @Service
 @RequiredArgsConstructor
@@ -123,9 +125,8 @@ public class IntentNodeService extends ServiceImpl<IntentNodeMapper, IntentNodeD
         return node.getId();
     }
 
-    private void configureAction(
-            IntentNodeDO node,
-            IntentNodeCreateRequest request) {
+    // 校验
+    private void configureAction(IntentNodeDO node, IntentNodeCreateRequest request) {
 
         Integer kind = request.getKind();
 
@@ -163,15 +164,132 @@ public class IntentNodeService extends ServiceImpl<IntentNodeMapper, IntentNodeD
                             && request.getMcpToolId().length() <= 128,
                     "MCP节点必须配置工具标识，最多128字符");
 
-            // 当前只登记配置，接入MCP工具目录后再校验工具是否存在。
+            // 当前只登记配置，
+            // TODO 接入MCP工具目录后再校验工具是否存在。
             node.setMcpToolId(request.getMcpToolId().strip());
         }
     }
-
+    // 拒绝
     private void require(boolean condition, String message) {
         if (!condition) {
-            throw new ResponseStatusException(
-                    HttpStatus.BAD_REQUEST, message);
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, message);
         }
+    }
+    // JSON化 意图树
+    public List<IntentTreeNode> buildTree() {
+
+        List<IntentNodeDO> nodes = lambdaQuery()
+                .eq(IntentNodeDO::getDeleted, 0)
+                .eq(IntentNodeDO::getEnabled, 1)
+                .orderByAsc(IntentNodeDO::getSortOrder)
+                .orderByAsc(IntentNodeDO::getId)
+                .list();
+
+        // intentCode -> 树节点，方便通过 parentCode 快速找到父节点。
+        Map<String, IntentTreeNode> nodeMap = new HashMap<>();
+
+        // 第一遍：把数据库记录转换成树节点。
+        for (IntentNodeDO node : nodes) {
+            if (!StringUtils.hasText(node.getIntentCode())
+                    || node.getLevel() == null
+                    || node.getLevel() < 0
+                    || node.getLevel() > 2) {
+
+                throw new ResponseStatusException(
+                        HttpStatus.INTERNAL_SERVER_ERROR,
+                        "意图节点编码或层级异常，节点ID：" + node.getId());
+            }
+
+            IntentTreeNode treeNode = toTreeNode(node);
+
+            if (nodeMap.putIfAbsent(node.getIntentCode(), treeNode) != null) {
+                throw new ResponseStatusException(
+                        HttpStatus.INTERNAL_SERVER_ERROR,
+                        "存在重复的意图编码：" + node.getIntentCode());
+            }
+        }
+
+        List<IntentTreeNode> roots = new ArrayList<>();
+
+        // 第二遍：连接父子关系。
+        for (IntentNodeDO node : nodes) {
+            IntentTreeNode current = nodeMap.get(node.getIntentCode());
+
+            if (!StringUtils.hasText(node.getParentCode())) {
+                if (node.getLevel() != 0) {
+                    throw new ResponseStatusException(
+                            HttpStatus.INTERNAL_SERVER_ERROR,
+                            "非根节点缺少父节点：" + node.getIntentCode());
+                }
+
+                roots.add(current);
+                continue;
+            }
+
+            IntentTreeNode parent = nodeMap.get(node.getParentCode());
+
+            if (parent == null) {
+                // 父节点不存在、被删除或被禁用：
+                // 当前节点不挂到任何根节点下，也不把它提升成根节点。
+                continue;
+            }
+
+            if (node.getLevel() != parent.getLevel() + 1) {
+                throw new ResponseStatusException(
+                        HttpStatus.INTERNAL_SERVER_ERROR,
+                        "父子节点层级不一致：" + node.getIntentCode());
+            }
+
+            parent.getChildren().add(current);
+        }
+
+        return roots;
+    }
+
+    private IntentTreeNode toTreeNode(IntentNodeDO node) {
+
+        IntentTreeNode result = new IntentTreeNode();
+        result.setIntentCode(node.getIntentCode());
+        result.setName(node.getName());
+        result.setLevel(node.getLevel());
+        result.setDescription(node.getDescription());
+
+        // 数据库中的 examples 是 JSON 字符串，返回时转成真正的数组。
+        if (StringUtils.hasText(node.getExamples())) {
+            try {
+                JsonNode array = jsonMapper.readTree(node.getExamples());
+
+                if (array == null || !array.isArray()) {
+                    throw new IllegalArgumentException("examples 必须是JSON数组");
+                }
+
+                List<String> examples = new ArrayList<>();
+
+                for (JsonNode item : array) {
+                    if (!item.isString()) {
+                        throw new IllegalArgumentException("示例问题必须是字符串");
+                    }
+
+                    examples.add(item.asString());
+                }
+
+                result.setExamples(examples);
+
+            } catch (JacksonException | IllegalArgumentException exception) {
+                throw new ResponseStatusException(
+                        HttpStatus.INTERNAL_SERVER_ERROR,
+                        "示例问题格式异常，意图编码：" + node.getIntentCode(),
+                        exception);
+            }
+        }
+
+        if (node.getLevel() == 2) {
+            result.setKind(node.getKind());
+            result.setKbId(node.getKbId());
+            result.setCollectionName(node.getCollectionName());
+            result.setMcpToolId(node.getMcpToolId());
+        }
+
+        return result;
     }
 }
