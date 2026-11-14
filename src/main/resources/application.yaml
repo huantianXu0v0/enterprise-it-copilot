@@ -23,6 +23,13 @@ rag:
       endpoint: http://localhost:9000
       access-key: rustfsadmin
       secret-key: rustfsadmin
+
+  chat-executor:
+    core-size: 4
+    max-size: 8
+    queue-capacity: 8
+    keep-alive-seconds: 60
+
 server:
   port: 1001
 
