@@ -25,4 +25,7 @@ public class IntentTreeNode {
 
     // 不存数据库，查询时组装。
     private List<IntentTreeNode> children = new ArrayList<>();
+
+    // 叶子节点 标识符
+    private boolean executable;
 }

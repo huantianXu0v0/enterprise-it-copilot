@@ -92,12 +92,12 @@ public class IntentNodeService extends ServiceImpl<IntentNodeMapper, IntentNodeD
         node.setDescription(request.getDescription());
         node.setExamples(jsonMapper.writeValueAsString(examples));
 
-        if (level < 2) {
-            // 中间节点仅用于组织目录，不参与动作执行。
-            require(request.getKind() == null
-                            && !StringUtils.hasText(request.getKbId())
+        if (request.getKind() == null) {
+            require(level < 2, "第2层必须配置执行动作");
+
+            require(!StringUtils.hasText(request.getKbId())
                             && !StringUtils.hasText(request.getMcpToolId()),
-                    "第0、1层只配置分类，第2层再配置执行动作");
+                    "分类节点不能绑定知识库或工具");
 
             node.setKind(0);
         } else {
@@ -169,12 +169,14 @@ public class IntentNodeService extends ServiceImpl<IntentNodeMapper, IntentNodeD
             node.setMcpToolId(request.getMcpToolId().strip());
         }
     }
+
     // 拒绝
     private void require(boolean condition, String message) {
         if (!condition) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, message);
         }
     }
+
     // JSON化 意图树
     public List<IntentTreeNode> buildTree() {
 
@@ -242,7 +244,10 @@ public class IntentNodeService extends ServiceImpl<IntentNodeMapper, IntentNodeD
 
             parent.getChildren().add(current);
         }
-
+        // 只有叶子节点才可以执行操作
+        for (IntentTreeNode node : nodeMap.values()) {
+            node.setExecutable(isExecutable(node));
+        }
         return roots;
     }
 
@@ -283,13 +288,37 @@ public class IntentNodeService extends ServiceImpl<IntentNodeMapper, IntentNodeD
             }
         }
 
-        if (node.getLevel() == 2) {
-            result.setKind(node.getKind());
-            result.setKbId(node.getKbId());
-            result.setCollectionName(node.getCollectionName());
-            result.setMcpToolId(node.getMcpToolId());
-        }
+        result.setKind(node.getKind());
+        result.setKbId(node.getKbId());
+        result.setCollectionName(node.getCollectionName());
+        result.setMcpToolId(node.getMcpToolId());
 
         return result;
+    }
+
+    private boolean isExecutable(IntentTreeNode node) {
+
+        if (!node.getChildren().isEmpty()) {
+            return false;
+        }
+
+        Integer kind = node.getKind();
+
+        if (Integer.valueOf(0).equals(kind)) {
+            return StringUtils.hasText(node.getKbId())
+                    && !StringUtils.hasText(node.getMcpToolId());
+        }
+
+        if (Integer.valueOf(1).equals(kind)) {
+            return !StringUtils.hasText(node.getKbId())
+                    && !StringUtils.hasText(node.getMcpToolId());
+        }
+
+        if (Integer.valueOf(2).equals(kind)) {
+            return StringUtils.hasText(node.getMcpToolId())
+                    && !StringUtils.hasText(node.getKbId());
+        }
+
+        return false;
     }
 }
