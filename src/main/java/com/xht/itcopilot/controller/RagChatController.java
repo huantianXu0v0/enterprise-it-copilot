@@ -27,12 +27,13 @@ public class RagChatController {
 
     // 检索 + 生成答案。
     // 同步返回
-    @PostMapping("/kb/{kbId}/{coversationId}")
+    @PostMapping("/kb/{kbId}/{conversationId}")
     public Result<RagAnswer> chat(
             @PathVariable("kbId") String kbId,
-            @RequestBody RagQueryRequest request) {
+            @RequestBody RagQueryRequest request,
+            @PathVariable("conversationId") String conversationId) {
 
-        return Result.ok(ragChatService.chat(kbId, request));
+        return Result.ok(ragChatService.chat(kbId, conversationId ,request));
     }
 
     // 流式输出

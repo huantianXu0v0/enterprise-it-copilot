@@ -1,10 +1,10 @@
 package com.xht.itcopilot.service;
 
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.xht.itcopilot.entity.*;
 import com.xht.itcopilot.mapper.KnowledgeBaseMapper;
 import com.xht.itcopilot.mapper.KnowledgeRetrievalMapper;
 import jakarta.annotation.Resource;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -16,7 +16,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
-import tools.jackson.databind.json.JsonMapper;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -38,6 +37,7 @@ public class RagChatService {
 
 
 
+    // 构造方法
     public RagChatService(
             KnowledgeBaseMapper knowledgeBaseMapper,
             KnowledgeRetrievalMapper retrievalMapper,
@@ -121,7 +121,9 @@ public class RagChatService {
         return results;
     }
 
-    public RagAnswer chat(String kbId, RagQueryRequest request) {
+    public RagAnswer chat(String kbId, String conversationId, RagQueryRequest request) {
+        // 检索之前 先 返回上下文
+
 
         List<RetrievedChunk> chunks = search(kbId, request);
 
