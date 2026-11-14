@@ -7,7 +7,7 @@ import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
-import java.util.List;
+import java.util.*;
 
 @RestController
 @RequiredArgsConstructor
@@ -49,6 +49,14 @@ public class RagChatController {
         return ragChatService.streamChat(kbId, conversationId, request);
     }
 
+    // 改写预览 接口
+    @PostMapping("/conversations/{conversationId}/rewrite-preview")
+    public Result<Map<String, Object>> previewRewrite(
+            @PathVariable("conversationId") String conversationId,
+            @RequestBody RagQueryRequest request) {
 
+        return Result.ok(
+                ragChatService.previewRewrite(conversationId, request));
+    }
 
 }

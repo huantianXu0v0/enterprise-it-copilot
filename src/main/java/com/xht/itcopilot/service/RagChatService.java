@@ -135,7 +135,11 @@ public class RagChatService {
         conversationService.checkConversation(conversationId);
         try (var lease = executionGuard.acquire(conversationId)) {
             ConversationMemory memory = memoryService.prepare(conversationId);
-            List<RetrievedChunk> chunks = search(kbId, request);
+
+            RagQueryRequest retrievalRequest =
+                    buildRetrievalRequest(request, memory);
+
+            List<RetrievedChunk> chunks = search(kbId, retrievalRequest);
             String answer;
             if (chunks.isEmpty() && memory.getMessages().isEmpty()
                     && !StringUtils.hasText(memory.getSummary())) {
@@ -198,7 +202,10 @@ public class RagChatService {
                 }
                 ConversationMemory memory = memoryService.prepare(conversationId);
 
-                List<RetrievedChunk> chunks = search(kbId, request);
+                RagQueryRequest retrievalRequest =
+                        buildRetrievalRequest(request, memory);
+
+                List<RetrievedChunk> chunks = search(kbId, retrievalRequest);
 
                 sendEvent(emitter, closed, "sources", chunks);
 
@@ -332,5 +339,40 @@ public class RagChatService {
             // 转成非检查异常，让发送失败能从回调中向外传递。
             throw new UncheckedIOException(exception);
         }
+    }
+
+    // 问题改写
+    public Map<String, Object> previewRewrite(
+            String conversationId,
+            RagQueryRequest request) {
+
+        validate(request);
+
+        // load 内部会校验会话归属；预览不触发摘要更新。
+        ConversationMemory memory = memoryService.load(conversationId);
+
+        String original = request.getQuestion().strip();
+        String rewritten = chatModelService.rewriteQuestion(original, memory);
+
+        return Map.of(
+                "originalQuestion", original,
+                "rewrittenQuestion", rewritten,
+                "changed", !original.equals(rewritten)
+        );
+    }
+
+    private RagQueryRequest buildRetrievalRequest(
+            RagQueryRequest original,
+            ConversationMemory memory) {
+
+        String rewritten = chatModelService.rewriteQuestion(
+                original.getQuestion(), memory);
+
+        RagQueryRequest retrievalRequest = new RagQueryRequest();
+        retrievalRequest.setQuestion(rewritten);
+        retrievalRequest.setTopK(original.getTopK());
+        retrievalRequest.setMinScore(original.getMinScore());
+
+        return retrievalRequest;
     }
 }
