@@ -17,6 +17,11 @@ logging:
 
 
 rag:
+  memory:
+    trigger-turns: 10
+    keep-turns: 5
+    max-summary-chars: 4000
+    max-prompt-chars: 60000
   storage:
     kb-bucket: rag-it-source
     s3:

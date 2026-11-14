@@ -1,10 +1,8 @@
 package com.xht.itcopilot.service;
 
-import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.xht.itcopilot.entity.*;
 import com.xht.itcopilot.mapper.KnowledgeBaseMapper;
 import com.xht.itcopilot.mapper.KnowledgeRetrievalMapper;
-import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -34,8 +32,11 @@ public class RagChatService {
     private final EmbeddingService embeddingService;
     private final ChatModelService chatModelService;
     private final AsyncTaskExecutor ragChatExecutor;
+    private final ConversationService conversationService;
+    private final ConversationMessageService conversationMessageService;
 
-
+    private final ConversationMemoryService memoryService;
+    private final ConversationExecutionGuard executionGuard;
 
     // 构造方法
     public RagChatService(
@@ -43,13 +44,21 @@ public class RagChatService {
             KnowledgeRetrievalMapper retrievalMapper,
             EmbeddingService embeddingService,
             ChatModelService chatModelService,
-            @Qualifier("ragChatExecutor") AsyncTaskExecutor ragChatExecutor) {
+            @Qualifier("ragChatExecutor") AsyncTaskExecutor ragChatExecutor,
+            ConversationService conversationService,
+            ConversationMessageService conversationMessageService,
+            ConversationMemoryService memoryService,
+            ConversationExecutionGuard executionGuard) {
 
         this.knowledgeBaseMapper = knowledgeBaseMapper;
         this.retrievalMapper = retrievalMapper;
         this.embeddingService = embeddingService;
         this.chatModelService = chatModelService;
         this.ragChatExecutor = ragChatExecutor;
+        this.conversationService = conversationService;
+        this.conversationMessageService = conversationMessageService;
+        this.memoryService = memoryService;
+        this.executionGuard = executionGuard;
     }
 
     @Value("${ai.embedding.id:qwen-emb-8b}")
@@ -122,34 +131,22 @@ public class RagChatService {
     }
 
     public RagAnswer chat(String kbId, String conversationId, RagQueryRequest request) {
-        // 检索之前 先 返回上下文
-
-
-        List<RetrievedChunk> chunks = search(kbId, request);
-
-        // 没有合格的片段时，不调用生成模型。
-        if (chunks.isEmpty()) {
-            return new RagAnswer(
-                    "当前知识库没有检索到足够相关的内容，请补充问题细节。",
-                    List.of());
+        validate(request);
+        conversationService.checkConversation(conversationId);
+        try (var lease = executionGuard.acquire(conversationId)) {
+            ConversationMemory memory = memoryService.prepare(conversationId);
+            List<RetrievedChunk> chunks = search(kbId, request);
+            String answer;
+            if (chunks.isEmpty() && memory.getMessages().isEmpty()
+                    && !StringUtils.hasText(memory.getSummary())) {
+                answer = "当前知识库没有检索到足够相关的内容，请补充问题细节。";
+            } else {
+                answer = chatModelService.answer(request.getQuestion().strip(), buildContext(chunks), memory);
+            }
+            conversationMessageService.saveCompletedTurn(conversationId, request.getQuestion().strip(), answer);
+            memoryService.afterTurn(conversationId);
+            return new RagAnswer(answer, chunks);
         }
-
-        // 4. 按顺序给片段编号，便于回答引用。
-        StringBuilder context = new StringBuilder();
-
-        for (int i = 0; i < chunks.size(); i++) {
-            RetrievedChunk chunk = chunks.get(i);
-
-            context.append("[").append(i + 1).append("]\n")
-                    .append("文档：").append(chunk.getDocName()).append("\n")
-                    .append("内容：\n").append(chunk.getContent())
-                    .append("\n\n");
-        }
-
-        // 5. 使用检索上下文生成答案。
-        String answer = chatModelService.answer(request.getQuestion().strip(), context.toString());
-
-        return new RagAnswer(answer, chunks);
     }
 
     private void validate(RagQueryRequest request) {
@@ -182,41 +179,72 @@ public class RagChatService {
         }
     }
 
-    public SseEmitter streamChat(String kbId, RagQueryRequest request) {
+    public SseEmitter streamChat(String kbId, String conversationId, RagQueryRequest request) {
 
         // 参数错误在建立流之前抛出，仍由异常处理器返回 Result.fail。
         validate(request);
+
+        // 校验会话 存在 且 属于当前用户
+        conversationService.checkConversation(conversationId);
 
         // 本次异步请求的超时时间：120秒。
         SseEmitter emitter = new SseEmitter(120_000L);
         AtomicBoolean closed = new AtomicBoolean(false);
 
         FutureTask<Void> task = new FutureTask<>(() -> {
-            try {
+            try (var lease = executionGuard.acquire(conversationId)) {
+                if (closed.get() || Thread.currentThread().isInterrupted()) {
+                    throw new CancellationException("任务已取消");
+                }
+                ConversationMemory memory = memoryService.prepare(conversationId);
+
                 List<RetrievedChunk> chunks = search(kbId, request);
 
-                // 先把实际使用的参考资料发送给前端。
                 sendEvent(emitter, closed, "sources", chunks);
 
-                if (chunks.isEmpty()) {
-                    sendEvent(emitter, closed, "delta", Map.of(
-                            "text", "当前知识库没有检索到足够相关的内容，请补充问题细节。"
-                    ));
+
+                // 每个请求自己创建一个，只由当前后台任务追加。
+                StringBuilder fullAnswer = new StringBuilder();
+
+                if (chunks.isEmpty() && memory.getMessages().isEmpty()
+                        && !StringUtils.hasText(memory.getSummary())) {
+                    String text = "当前知识库没有检索到足够相关的内容，请补充问题细节。";
+
+                    fullAnswer.append(text);
+                    sendEvent(emitter, closed, "delta", Map.of("text", text));
                 } else {
                     // 将chunks变成 [1] xxx ; [2] xxx 的 字符串的形式
                     String context = buildContext(chunks);
 
-                    // 下一步实现这个方法：
-                    // 模型每返回一段文字，就执行一次这里的回调。
+                    // 模型每返回一段文字，就执行一次回调。
                     chatModelService.answerStream(
                             request.getQuestion().strip(),
                             context,
-                            text -> sendEvent(emitter, closed, "delta", Map.of("text", text))
+                            memory,
+                            text ->
+                            {
+                                fullAnswer.append(text);
+                                sendEvent(emitter, closed, "delta", Map.of("text", text));
+                            }
                     );
                 }
 
-                sendEvent(emitter, closed, "done", Map.of("finished", true));
+                // 已知连接结束或任务已取消，不再开始保存。
+                if (closed.get() || Thread.currentThread().isInterrupted()) {
+                    throw new CancellationException("任务已取消");
+                }
 
+                // 只有模型正常完成，或者正常返回“未找到资料”，才走到这里。
+                conversationMessageService.saveCompletedTurn(
+                        conversationId,
+                        request.getQuestion().strip(),
+                        fullAnswer.toString());
+
+                // 每累计10轮未压缩历史，合并最早5轮；失败保留旧摘要及原文。
+                memoryService.afterTurn(conversationId);
+
+                // 保存成功后，再通知前端本轮完成。
+                sendEvent(emitter, closed, "done", Map.of("finished", true));
             } catch (UncheckedIOException | CancellationException exception) {
                 // 连接写入失败或任务取消，停止发送。
                 closed.set(true);

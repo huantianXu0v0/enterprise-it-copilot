@@ -38,13 +38,17 @@ public class RagChatController {
 
     // 流式输出
     @PostMapping(
-            value = "/kb/{kbId}/stream",
+            value = "/kb/{kbId}/stream/{conversationId}",
             produces = MediaType.TEXT_EVENT_STREAM_VALUE
     )
     public SseEmitter streamChat(
             @PathVariable("kbId") String kbId,
-            @RequestBody RagQueryRequest request) {
+            @RequestBody RagQueryRequest request,
+            @PathVariable("conversationId") String conversationId) {
 
-        return ragChatService.streamChat(kbId, request);
+        return ragChatService.streamChat(kbId, conversationId, request);
     }
+
+
+
 }
