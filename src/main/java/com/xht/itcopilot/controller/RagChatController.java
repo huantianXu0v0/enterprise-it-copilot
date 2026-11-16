@@ -1,6 +1,7 @@
 package com.xht.itcopilot.controller;
 
 import com.xht.itcopilot.entity.*;
+import com.xht.itcopilot.service.IntentRouterService;
 import com.xht.itcopilot.service.RagChatService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
@@ -15,6 +16,7 @@ import java.util.*;
 public class RagChatController {
 
     private final RagChatService ragChatService;
+    private final IntentRouterService intentRouterService;
 
     // 只检索，方便排查命中的内容是否正确。
     @PostMapping("/kb/{kbId}/search")
@@ -58,5 +60,12 @@ public class RagChatController {
         return Result.ok(
                 ragChatService.previewRewrite(conversationId, request));
     }
+
+    // 路由预览 接口
+    @PostMapping("/conversations/{conversationId}/route-preview")
+    public Result<RoutePlan> previewRoute(@PathVariable("conversationId")String conversationId, @RequestBody RagQueryRequest request){
+        return Result.ok(intentRouterService.plan(conversationId, request));
+    }
+
 
 }
