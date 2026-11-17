@@ -58,6 +58,12 @@ public class ConversationMessageService extends ServiceImpl<ConversationMessageM
         if (!updated) {
             throw new IllegalStateException("会话更新时间失败");
         }
+        conversationService.lambdaUpdate()
+                .eq(ConversationDO::getConversationId, conversationId)
+                .eq(ConversationDO::getUserId, "local").eq(ConversationDO::getDeleted,0)
+                .eq(ConversationDO::getTitle,"新对话")
+                .set(ConversationDO::getTitle,question.strip().substring(0,Math.min(24,question.strip().length())))
+                .update();
 
 //        log.info("本轮消息已写入事务：conversationId={}, userMessageId={}, assistantMessageId={}",
 //                conversationId, userMessage.getId(), assistantMessage.getId());

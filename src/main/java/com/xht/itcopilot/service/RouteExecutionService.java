@@ -48,7 +48,9 @@ public class RouteExecutionService {
             sources = deduplicate(sources); // 去重
             String answer;
             if (plan.getTasks().isEmpty()) {
-                answer = "暂时没有匹配到可处理的需求，请补充你要查询或办理的事项。";
+                FallbackAnswer fallback = model.answerUnmatched(plan.getOriginalQuestion(), memory);
+                answer = fallback.getAnswer();
+                plan.setStatus(fallback.getType());
             } else if (branches.stream().noneMatch(b -> "success".equals(b.getStatus()))) {
                 // 全部缺参、失败或无检索结果，直接给出明确说明。
                 answer = branches.stream().map(BranchResult::getMessage)

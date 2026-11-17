@@ -22,6 +22,7 @@ import java.util.*;
 public class IntentNodeService extends ServiceImpl<IntentNodeMapper, IntentNodeDO> {
 
     private final KnowledgeBaseMapper knowledgeBaseMapper;
+    private final McpToolService mcpToolService;
 
     private final JsonMapper jsonMapper = JsonMapper.builder().build();
 
@@ -125,6 +126,26 @@ public class IntentNodeService extends ServiceImpl<IntentNodeMapper, IntentNodeD
         return node.getId();
     }
 
+    public void updateBinding(String code, IntentNodeCreateRequest request) {
+        require(request != null,"请求不能为空");
+        IntentNodeDO node = lambdaQuery().eq(IntentNodeDO::getIntentCode,code)
+                .eq(IntentNodeDO::getDeleted,0).one();
+        require(node != null,"意图节点不存在");
+        require(!lambdaQuery().eq(IntentNodeDO::getParentCode,code)
+                .eq(IntentNodeDO::getDeleted,0).exists(),"只能修改叶子节点的资源绑定");
+        if (!StringUtils.hasText(request.getDescription())) request.setDescription(node.getDescription());
+        configureAction(node,request);
+        node.setDescription(request.getDescription());
+        require(node.getDescription().length()<=512,"描述不能超过512字符");
+        lambdaUpdate().eq(IntentNodeDO::getId,node.getId())
+                .set(IntentNodeDO::getKind,node.getKind())
+                .set(IntentNodeDO::getKbId,request.getKind()==0?node.getKbId():null)
+                .set(IntentNodeDO::getCollectionName,request.getKind()==0?node.getCollectionName():null)
+                .set(IntentNodeDO::getMcpToolId,request.getKind()==2?node.getMcpToolId():null)
+                .set(IntentNodeDO::getDescription,node.getDescription())
+                .set(IntentNodeDO::getUpdateTime,LocalDateTime.now()).update();
+    }
+
     // 校验
     private void configureAction(IntentNodeDO node, IntentNodeCreateRequest request) {
 
@@ -164,8 +185,8 @@ public class IntentNodeService extends ServiceImpl<IntentNodeMapper, IntentNodeD
                             && request.getMcpToolId().length() <= 128,
                     "MCP节点必须配置工具标识，最多128字符");
 
-            // 当前只登记配置，
-            // TODO 接入MCP工具目录后再校验工具是否存在。
+            require(mcpToolService.listTools().stream().anyMatch(t -> t.name().equals(request.getMcpToolId().strip())),
+                    "绑定的工具不存在，请从实际工具列表中选择");
             node.setMcpToolId(request.getMcpToolId().strip());
         }
     }

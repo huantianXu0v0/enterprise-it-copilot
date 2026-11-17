@@ -45,6 +45,10 @@ public class IntentTreeCacheService {
                     exception.getClass().getSimpleName());
         }
 
+        return refreshTree();
+    }
+
+    public synchronized List<IntentTreeNode> refreshTree() {
         List<IntentTreeNode> tree = intentNodeService.buildTree();
 
         String json = jsonMapper.writeValueAsString(tree);

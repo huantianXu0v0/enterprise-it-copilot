@@ -21,9 +21,19 @@ public class IntentRouterService {
             String conversationId,
             RagQueryRequest request) {
 
+        try {
+            return buildPlan(conversationId, request, false);
+        } catch (ResponseStatusException exception) {
+            if (exception.getStatusCode().value() != 409) throw exception;
+            log.info("意图配置变化，刷新缓存并重新识别一次");
+            return buildPlan(conversationId, request, true);
+        }
+    }
+
+    private RoutePlan buildPlan(String conversationId, RagQueryRequest request, boolean fresh) {
         // 内部已经完成：会话校验、读取历史、改写、识别意图。
         IntentRecognitionResult recognition =
-                recognitionService.recognize(conversationId, request);
+                recognitionService.recognize(conversationId, request, fresh);
 
         if (recognition.getIntents().isEmpty()) {
             return new RoutePlan(

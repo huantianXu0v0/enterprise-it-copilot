@@ -17,8 +17,13 @@ public class IntentRecognitionService {
     private final ConversationMemoryService memoryService;
     private final ChatModelService chatModelService;
     private final IntentTreeCacheService cacheService;
+    private final McpToolService tools;
 
     public IntentRecognitionResult recognize(String conversationId, RagQueryRequest request) {
+        return recognize(conversationId,request,false);
+    }
+
+    public IntentRecognitionResult recognize(String conversationId, RagQueryRequest request, boolean fresh) {
 
         if (request == null
                 || !StringUtils.hasText(request.getQuestion())
@@ -34,7 +39,20 @@ public class IntentRecognitionService {
 
         String rewritten = chatModelService.rewriteQuestion(original, memory);
 
-        List<IntentTreeNode> tree = cacheService.getTree();
+        List<IntentTreeNode> tree = fresh ? cacheService.refreshTree() : cacheService.getTree();
+
+        // 工具目录可读时，剔除旧项目里绑定了不存在工具的节点。
+        // 服务临时离线时保留节点，让执行层明确报告失败，而非误判为不支持。
+        Set<String> availableTools = null;
+        try {
+            availableTools = new HashSet<>();
+            for (var tool : tools.listTools()) availableTools.add(tool.name());
+        } catch (RuntimeException exception) {
+            if (Thread.currentThread().isInterrupted() || exception instanceof CancellationException)
+                throw new CancellationException("意图识别已取消");
+            availableTools = null;
+        }
+        if (availableTools != null) tree = filterTools(tree, availableTools);
 
         // 建立可执行节点索引，用于校验模型返回的编码。
         Map<String, IntentTreeNode> executableNodes = new HashMap<>();
@@ -71,6 +89,20 @@ public class IntentRecognitionService {
                 rewritten,
                 matches.isEmpty() ? "no_match" : "matched",
                 matches);
+    }
+
+    private List<IntentTreeNode> filterTools(List<IntentTreeNode> nodes, Set<String> available) {
+        List<IntentTreeNode> result = new ArrayList<>();
+        for (IntentTreeNode node : nodes) {
+            if (node.getChildren().isEmpty() && Integer.valueOf(2).equals(node.getKind())
+                    && !available.contains(node.getMcpToolId())) continue;
+            IntentTreeNode copy = new IntentTreeNode();
+            org.springframework.beans.BeanUtils.copyProperties(node, copy);
+            copy.setChildren(filterTools(node.getChildren(), available));
+            if (!node.getChildren().isEmpty() && copy.getChildren().isEmpty()) continue;
+            result.add(copy);
+        }
+        return result;
     }
 
     private void collectExecutable(

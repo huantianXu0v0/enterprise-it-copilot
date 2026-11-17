@@ -31,6 +31,14 @@ public class IntentNodeController {
         return Result.ok(Map.of("id", id));
     }
 
+    @PutMapping("/{code}/binding")
+    public Result<Void> updateBinding(@PathVariable("code") String code,
+                                     @RequestBody IntentNodeCreateRequest request) {
+        intentNodeService.updateBinding(code,request);
+        cacheService.evict();
+        return Result.ok();
+    }
+
     // 查询意图节点
     @GetMapping("/tree")
     public Result<List<IntentTreeNode>> tree(){
