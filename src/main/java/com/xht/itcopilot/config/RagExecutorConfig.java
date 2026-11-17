@@ -11,6 +11,17 @@ import java.util.concurrent.ThreadPoolExecutor;
 @Configuration
 public class RagExecutorConfig {
 
+    @Bean(name = "ragStreamHeartbeat", destroyMethod = "shutdownNow")
+    public java.util.concurrent.ScheduledExecutorService ragStreamHeartbeat() {
+        var scheduler = new java.util.concurrent.ScheduledThreadPoolExecutor(1, runnable -> {
+            Thread thread = new Thread(runnable, "rag-sse-heartbeat");
+            thread.setDaemon(true);
+            return thread;
+        });
+        scheduler.setRemoveOnCancelPolicy(true);
+        return scheduler;
+    }
+
     @Bean("ragChatExecutor")
     public ThreadPoolTaskExecutor ragChatExecutor(
             @Value("${rag.chat-executor.core-size:4}") int coreSize,

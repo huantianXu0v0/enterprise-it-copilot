@@ -13,6 +13,8 @@ import tools.jackson.databind.json.JsonMapper;
 import java.util.*;
 import java.util.concurrent.CancellationException;
 import java.util.stream.Collectors;
+import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 
 @Slf4j
 @Service
@@ -30,16 +32,33 @@ public class RouteExecutionService {
     private final JsonMapper jsonMapper = JsonMapper.builder().build();
 
     public RouteExecutionResult chat(String conversationId, RagQueryRequest request) {
-        validate(request); // 参数校验
+        validateConversation(conversationId, request);
+        return runTurn(conversationId, request, null);
+    }
+
+    void validateConversation(String conversationId, RagQueryRequest request) {
+        validate(request);
         conversations.checkConversation(conversationId);
+    }
+
+    // SSE 与同步入口共用路由、分支执行和保存，避免执行两次工具或重复写入消息。
+    RouteExecutionResult streamTurn(String conversationId, RagQueryRequest request,
+                                    BiConsumer<String, Object> events) {
+        return runTurn(conversationId, request, events);
+    }
+
+    private RouteExecutionResult runTurn(String conversationId, RagQueryRequest request,
+                                          BiConsumer<String, Object> events) {
         try (var lease = guard.acquire(conversationId)) { // 一个问题只允许 一个线程在执行
             checkCancelled(); // 是否暂停
+            emit(events, "phase", Map.of("message", "正在读取记忆、理解问题…"));
             ConversationMemory memory = memoryService.prepare(conversationId);
             // plan 内部改写和识别各执行一次，且读取的是刚 prepare 后的记忆。
             RoutePlan plan = router.plan(conversationId, request);
             List<RetrievedChunk> sources = new ArrayList<>();
             List<BranchResult> branches = new ArrayList<>();
 
+            emit(events, "phase", Map.of("message", "正在检索资料、执行工具…"));
             for (RoutePlan.Task task : plan.getTasks()) {
                 checkCancelled();
                 branches.add(execute(task, plan, request, memory, sources));
@@ -47,7 +66,21 @@ public class RouteExecutionService {
             checkCancelled();
             sources = deduplicate(sources); // 去重
             String answer;
-            if (plan.getTasks().isEmpty()) {
+            StringBuilder fullAnswer = new StringBuilder();
+            Consumer<String> onDelta = text -> {
+                checkCancelled();
+                fullAnswer.append(text);
+                emit(events, "delta", Map.of("text", text));
+            };
+            Consumer<String> onReasoning = text -> emit(events, "reasoning", Map.of("text", text));
+            emit(events, "phase", Map.of("message", request.isDeepThinking()
+                    ? "正在等待模型思考…" : "正在生成回答…"));
+            if (events != null && plan.getTasks().isEmpty()) {
+                plan.setStatus("fallback");
+                model.answerUnmatchedStream(plan.getOriginalQuestion(), memory,
+                        request.isDeepThinking(), onReasoning, onDelta);
+                answer = fullAnswer.toString();
+            } else if (plan.getTasks().isEmpty()) {
                 FallbackAnswer fallback = model.answerUnmatched(plan.getOriginalQuestion(), memory);
                 answer = fallback.getAnswer();
                 plan.setStatus(fallback.getType());
@@ -55,15 +88,31 @@ public class RouteExecutionService {
                 // 全部缺参、失败或无检索结果，直接给出明确说明。
                 answer = branches.stream().map(BranchResult::getMessage)
                         .distinct().collect(Collectors.joining("\n"));
+                if (events != null) onDelta.accept(answer);
+            } else if (events != null) {
+                model.answerRoutedStream(plan.getOriginalQuestion(), buildContext(sources, branches),
+                        memory, request.isDeepThinking(), onReasoning, onDelta);
+                answer = fullAnswer.toString();
             } else {
                 answer = model.answerRouted(plan.getOriginalQuestion(),
                         buildContext(sources, branches), memory);
             }
             checkCancelled();
+            if (!StringUtils.hasText(answer)) {
+                throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "模型未返回有效回答");
+            }
+            emit(events, "phase", Map.of("message", "正在保存本轮对话…"));
+            checkCancelled();
+            // 思考片段只推送给页面；入库和摘要只使用最终正文。
             messages.saveCompletedTurn(conversationId, plan.getOriginalQuestion(), answer);
             memoryService.afterTurn(conversationId);
             return new RouteExecutionResult(answer, plan, sources, branches);
         }
+    }
+
+    private void emit(BiConsumer<String, Object> events, String event, Object data) {
+        checkCancelled();
+        if (events != null) events.accept(event, data);
     }
 
     private BranchResult execute(RoutePlan.Task task, RoutePlan plan,

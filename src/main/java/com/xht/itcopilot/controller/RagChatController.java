@@ -5,6 +5,7 @@ import com.xht.itcopilot.service.IntentRouterService;
 import com.xht.itcopilot.service.McpToolService;
 import com.xht.itcopilot.service.RagChatService;
 import com.xht.itcopilot.service.RouteExecutionService;
+import com.xht.itcopilot.service.RouteChatStreamService;
 import io.modelcontextprotocol.spec.McpSchema;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
@@ -22,6 +23,18 @@ public class RagChatController {
     private final IntentRouterService intentRouterService;
     private final McpToolService mcpToolService;
     private final RouteExecutionService routeExecutionService; // 意图识别之后,  路由到各自链路执行
+
+    private final RouteChatStreamService routeChatStreamService;
+
+    @PostMapping(value = "/conversations/{conversationId}/ask/stream",
+            produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter askStream(@PathVariable("conversationId") String conversationId,
+                                @RequestBody RagQueryRequest request,
+                                jakarta.servlet.http.HttpServletResponse response) {
+        response.setHeader("Cache-Control", "no-cache");
+        response.setHeader("X-Accel-Buffering", "no");
+        return routeChatStreamService.stream(conversationId, request);
+    }
 
     // 只检索，方便排查命中的内容是否正确。
     @PostMapping("/kb/{kbId}/search")
