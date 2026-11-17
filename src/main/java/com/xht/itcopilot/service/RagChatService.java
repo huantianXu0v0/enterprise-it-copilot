@@ -202,13 +202,12 @@ public class RagChatService {
                 }
                 ConversationMemory memory = memoryService.prepare(conversationId);
 
-                RagQueryRequest retrievalRequest =
-                        buildRetrievalRequest(request, memory);
+                // 会根据 记忆进行 问题重写
+                RagQueryRequest retrievalRequest = buildRetrievalRequest(request, memory);
 
                 List<RetrievedChunk> chunks = search(kbId, retrievalRequest);
 
                 sendEvent(emitter, closed, "sources", chunks);
-
 
                 // 每个请求自己创建一个，只由当前后台任务追加。
                 StringBuilder fullAnswer = new StringBuilder();
@@ -361,12 +360,9 @@ public class RagChatService {
         );
     }
 
-    private RagQueryRequest buildRetrievalRequest(
-            RagQueryRequest original,
-            ConversationMemory memory) {
+    private RagQueryRequest buildRetrievalRequest(RagQueryRequest original, ConversationMemory memory) {
 
-        String rewritten = chatModelService.rewriteQuestion(
-                original.getQuestion(), memory);
+        String rewritten = chatModelService.rewriteQuestion(original.getQuestion(), memory);
 
         RagQueryRequest retrievalRequest = new RagQueryRequest();
         retrievalRequest.setQuestion(rewritten);

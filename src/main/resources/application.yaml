@@ -57,3 +57,7 @@ ai:
     url: https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions
     api-key: ${chat-key}
     model: qwen-plus
+
+mcp:
+  server-url: http://localhost:1002
+  endpoint: /mcp
